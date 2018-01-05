@@ -55,7 +55,7 @@ def create_tfrecords(data, record_name, split_num = 100, start_from=0):
 
         for idx in tqdm(range(st, ed), desc='Examples', ncols=80, leave=False):
             sents = data[idx]['sentences']
-            quest = data[idx]['questions']
+            quest = data[idx]['question']
             opt = data[idx]['options']
             qwos = data[idx]['queries']
             index = data[idx]['index']
@@ -73,7 +73,7 @@ def create_tfrecords(data, record_name, split_num = 100, start_from=0):
             example = tf.train.Example(features=tf.train.Features(
                     feature={
                             'sentences': _int64_feature(flatten_sents),
-                            'questions': _int64_feature(padded_quest),
+                            'question': _int64_feature(padded_quest),
                             'options': _int64_feature(opt),
                             'queries': _int64_feature(flatten_qwos),
                             'index': _int64_feature(index),

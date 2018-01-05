@@ -64,8 +64,8 @@ class MemNet(object):
         with tf.variable_scope('embedding', reuse=reuse):
             W = tf.get_variable('Unembed', [self.embed_size, self.embed_size], initializer=self.emb_initializer)
 
-            x = tf.nn.embedding_lookup(W, pred, name='unembed_vector')
-            return x
+            W = tf.transpose(W, [1, 0])
+            return tf.matmul(pred, W)
 
     def _fc(self, inputs, num_out, name):
         with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
@@ -96,7 +96,7 @@ class MemNet(object):
             mask = tf.to_float(mask)
             neg_mask = tf.abs(mask-1)
 
-        linear_start = tf.placeholder(tf.int32, shape=[], name='linear_start')
+        linear_start = tf.placeholder(tf.int32, name='linear_start')
 
         with tf.variable_scope('MemN2N'):
             emb_q = self._query_embedding(query) # [batch_size, sentence_size, embed_size]
@@ -130,7 +130,7 @@ class MemNet(object):
                 u = o + u # [batch_size, embed_size]
 
                 a_hat = self._unembedding(u) #a_hat [batch_size, embed_size]
-                a_hat = tf.expand_dim(a_hat, 1) #a_hat [batch_size, 1, embed_size]
+                a_hat = tf.expand_dims(a_hat, 1) #a_hat [batch_size, 1, embed_size]
 
             a_hat_norm = tf.nn.l2_normalize(a_hat, 2)
             opt_norm = tf.nn.l2_normalize(emb_opt, 2)
@@ -173,8 +173,6 @@ class MemNet(object):
             mask = tf.to_float(mask)
             neg_mask = tf.abs(mask-1)
 
-        linear_start = tf.placeholder(tf.int32, shape=[], name='linear_start')
-
         with tf.variable_scope('MemN2N'):
             emb_q = self._query_embedding(query) # [batch_size, sentence_size, embed_size]
             emb_opt = self._query_embedding(option) # [batch_size, option_size, embed_size]
@@ -205,7 +203,7 @@ class MemNet(object):
                 u = o + u # [batch_size, embed_size]
 
                 a_hat = self._unembedding(u) #a_hat [batch_size, embed_size]
-                a_hat = tf.expand_dim(a_hat, 1) #a_hat [batch_size, 1, embed_size]
+                a_hat = tf.expand_dims(a_hat, 1) #a_hat [batch_size, 1, embed_size]
 
             a_hat_norm = tf.nn.l2_normalize(a_hat, 2)
             opt_norm = tf.nn.l2_normalize(emb_opt, 2)

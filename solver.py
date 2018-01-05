@@ -5,7 +5,7 @@ import tensorflow as tf
 
 from tqdm import tqdm
 from tqdm import trange
-from preprocess import decode_str
+from preprocess import decode
 
 class Solver(object):
     def __init__(self, model, enc_map, dec_map, **kwargs):
@@ -20,11 +20,15 @@ class Solver(object):
         self.batch_size = kwargs.pop('batch_size', 100)
         self.learning_rate = kwargs.pop('learning_rate', 0.01)
         self.max_norm_clip = kwargs.pop('max_norm_clip', 40.0)
-        self.decay_epoch = kwargs.pop('decay_epoch', 20)
+        self.decay_epoch = kwargs.pop('decay_epoch', 25)
         self.decay_rate = kwargs.pop('decay_rate', 0.65)
         self.val_epoch = kwargs.pop('val_epoch', 1)
 
         self.linear_start = kwargs.pop('linear_start', True)
+        if self.linear_start:
+            self.linear_start = 1
+        else:
+            self.linear_start = 0
 
         #===== EVALUATION ARGUMENTS =====
         self.eval_batch_size = kwargs.pop('eval_batch_size', 64)
@@ -64,7 +68,7 @@ class Solver(object):
         def training_parser(record):
             keys_to_features = {
                 'sentences': tf.FixedLenFeature([self.sentence_size*self.memory_size], tf.int64),
-                'questions': tf.FixedLenFeature([self.sentence_size], tf.int64),
+                'question': tf.FixedLenFeature([self.sentence_size], tf.int64),
                 'options': tf.FixedLenFeature([self.option_size], tf.int64),
                 'queries': tf.FixedLenFeature([self.sentence_size*self.option_size], tf.int64),
                 'index': tf.FixedLenFeature([1], dtype=tf.int64),
@@ -72,7 +76,7 @@ class Solver(object):
 
             features = tf.parse_single_example(record, features=keys_to_features)
             sentences = features['sentences']
-            questions = features['questions']
+            questions = features['question']
             options = features['options']
             queries = features['queries']
             answer = features['index']
@@ -83,7 +87,7 @@ class Solver(object):
 
             records = {
                     'sentences': sentences,
-                    'questions': questions,
+                    'question': questions,
                     'options': options,
                     'queries': queries,
                     'index': answer,
@@ -109,17 +113,17 @@ class Solver(object):
         records = iterator.get_next()
 
         sentences = tf.reshape(records['sentences'], [-1, self.memory_size, self.sentence_size])
-        questions = tf.reshape(records['questions'], [-1, self.sentence_size])
+        questions = tf.reshape(records['question'], [-1, self.sentence_size])
         options = tf.reshape(records['options'], [-1, self.option_size])
         queries = tf.reshape(records['queries'], [-1, self.option_size, self.sentence_size])
         mask = tf.reshape(records['position_mask'], [-1, self.sentence_size])
         answers = records['index']
 
         data = {'sentences': sentences, 
-                'questions':questions, 
+                'question':questions, 
                 'options': options,
                 'queries': queries,
-                'answers': answers,
+                'answer': answers,
                 'mask': mask}
 
         return iterator, data
@@ -206,11 +210,11 @@ class Solver(object):
 
         # build model & sampler
         train_handle, loss = self.model.build_model(train_data['sentences'], 
-                                                    train_data['questions'], 
+                                                    train_data['question'], 
                                                     train_data['options'],
-                                                    train_data['answers'])
+                                                    train_data['answer'])
         val_handle, generated_answer = self.model.build_sampler(val_data['sentences'], 
-                                                                val_data['questions'], 
+                                                                val_data['question'], 
                                                                 val_data['options'])
 
         # create optimizer & apply gradients
@@ -243,6 +247,8 @@ class Solver(object):
 
         summary_op = tf.summary.merge_all()
 
+        feed_dict = {train_handle.linear_start: self.linear_start}
+
         print('     DONE !!\n')
 
         print(' ======= INFO =======')
@@ -252,6 +258,7 @@ class Solver(object):
         print(" :: Validation data size: ", val_examples)
         print(' :: Total training iterations per epoch: ', train_iters_per_epoch)
         print(' :: Total validation iterations per epoch: ', val_iters_per_epoch)
+        print(' :: Linear start: ', self.linear_start)
         print('')
 
         print(' :: Start Session...')
@@ -276,8 +283,8 @@ class Solver(object):
                     print('    [Found] pretrained model ', latest_ckpt)
                     saver.restore(sess, latest_ckpt)
 
-            sess.run(train_iter.initializer)
-            sess.run(val_iter.initializer)
+            sess.run(train_iter.initializer, feed_dict=feed_dict)
+            sess.run(val_iter.initializer, feed_dict=feed_dict)
 
             prev_loss = -1
             curr_loss = 0
@@ -292,12 +299,12 @@ class Solver(object):
                     for i in range(train_iters_per_epoch):
 
                         op = [global_step, train_handle.option, train_handle.selection, train_handle.answer, learning_rate, loss, train_op]
-                        step_, o_, s_, a_, lr_, loss_, _ = sess.run(op, feed_dict={train_handle.linear_start: self.linear_start})
+                        step_, o_, s_, a_, lr_, loss_, _ = sess.run(op, feed_dict=feed_dict)
 
                         curr_loss += loss_
 
                         if (i+1) % self.summary_step == 0:
-                            summary = sess.run(summary_op)
+                            summary = sess.run(summary_op, feed_dict=feed_dict)
                             summary_writer.add_summary(summary, global_step=step_)
 
                         if (i+1) % self.print_step == 0:
@@ -330,8 +337,8 @@ class Solver(object):
                         total_correct = 0
                         total_wrong = 0
                         for i in range(val_iters_per_epoch):
-                            op = [val_handle.selection, val_data['answers']]
-                            s_, a_ = sess.run(op)
+                            op = [val_handle.selection, val_data['answer']]
+                            s_, a_ = sess.run(op, feed_dict=feed_dict)
 
                             s_ = np.array(s_).reshape(-1)
                             a_ = np.array(a_).reshape(-1)
@@ -387,7 +394,7 @@ class Solver(object):
 
         # build model & sampler
         test_handle, generated_answer = self.model.build_sampler(test_data['sentences'],
-                                                                test_data['questions'],
+                                                                test_data['question'],
                                                                 test_data['options'])
 
         print('     DONE !!\n')
@@ -428,7 +435,7 @@ class Solver(object):
             total_correct = 0
             total_wrong = 0
             for i in range(test_iters_per_epoch):
-                op = [test_handle.selection, test_data['answers']]
+                op = [test_handle.selection, test_data['answer']]
                 s_, a_ = sess.run(op)
 
                 s_ = np.array(s_).reshape(-1)
