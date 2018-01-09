@@ -129,13 +129,13 @@ class MemNet(object):
                 o = tf.reduce_sum(mem_o*p, 1) # [batch_size, embed_size]
                 u = o + u # [batch_size, embed_size]
 
-                a_hat = self._unembedding(u) #a_hat [batch_size, embed_size]
-                a_hat = tf.expand_dims(a_hat, 1) #a_hat [batch_size, 1, embed_size]
+            a_hat = self._unembedding(u) #a_hat [batch_size, embed_size]
+            a_hat = tf.expand_dims(a_hat, 1) #a_hat [batch_size, 1, embed_size]
 
             a_hat_norm = tf.nn.l2_normalize(a_hat, 2)
             opt_norm = tf.nn.l2_normalize(emb_opt, 2)
             
-            logits = tf.abs(tf.reduce_sum(tf.multiply(a_hat_norm, opt_norm), 2)) # [batch_size, option_size]
+            logits = tf.reduce_sum(a_hat_norm*opt_norm, 2) # [batch_size, option_size]
 
 
             selection = tf.argmax(logits, 1)
@@ -153,6 +153,7 @@ class MemNet(object):
             handle.option = option
             handle.selection = selection
             handle.linear_start = linear_start
+            handle.debug = logits
 
             return handle, loss
 
@@ -202,13 +203,13 @@ class MemNet(object):
                 o = tf.reduce_sum(mem_o*p, 1) # [batch_size, embed_size]
                 u = o + u # [batch_size, embed_size]
 
-                a_hat = self._unembedding(u) #a_hat [batch_size, embed_size]
-                a_hat = tf.expand_dims(a_hat, 1) #a_hat [batch_size, 1, embed_size]
+            a_hat = self._unembedding(u) #a_hat [batch_size, embed_size]
+            a_hat = tf.expand_dims(a_hat, 1) #a_hat [batch_size, 1, embed_size]
 
             a_hat_norm = tf.nn.l2_normalize(a_hat, 2)
             opt_norm = tf.nn.l2_normalize(emb_opt, 2)
             
-            logits = tf.abs(tf.reduce_sum(tf.multiply(a_hat_norm, opt_norm), 2)) # [batch_size, option_size]
+            logits = tf.reduce_sum(a_hat_norm*opt_norm, 2) # [batch_size, option_size]
 
             selection = tf.argmax(logits, 1)
 

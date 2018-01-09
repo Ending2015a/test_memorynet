@@ -26,7 +26,7 @@ def main():
     solver = Solver(model, enc_map, dec_map,
                     n_epochs = 500,
                     batch_size = 64,
-                    learning_rate = 0.005,
+                    learning_rate = 0.01,
                     log_path = './log/',
                     model_path = './checkpoint/',
                     restore_path = './checkpoint/',
@@ -34,7 +34,7 @@ def main():
                     save_epoch = 1,
                     print_step = 10,
                     summary_step = 10,
-                    linear_start= True)
+                    linear_start= False)
 
     solver.train()
 

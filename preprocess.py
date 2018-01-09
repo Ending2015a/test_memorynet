@@ -328,17 +328,17 @@ def crop_or_pad(sentence, size, padding_word=0):
     sentence = sentence[0:length-crop] + [padding_word] * pad
     return sentence
 
-def parse_input_data_list(lines, enc_map, sentence_size, with_answer=False):
-    lines = [line for line in lines if is_int(line.split(' ', 1)[0]) ]
-    question_list = parse_question(lines, with_answer)
+def parse_input_data_list(lines, enc_map, sentence_size, has_answer=False):
+    question_list = parse_questions(lines, has_answer)
     enc_questions = encode_questions(question_list, enc_map)
 
     padded_enc = []
-    for q in enc_question:
-        q['queries'] = [ crop_or_pad(qr, sentence_size) for qr in q['queries']]
+    for q in enc_questions: 
         q['sentences'] = [ crop_or_pad(sent, sentence_size) for sent in q['sentences']]
+        q['question'] = crop_or_pad(q['question'], sentence_size)
+        q['queries'] = [ crop_or_pad(qr, sentence_size) for qr in q['queries']]
+        q['options'] = q['options']
         q['index'] = [q['index']]
-        q['position_mask'] = crop_or_pad(q['position_mask'], sentence_size)
 
         padded_enc.append(q)
 

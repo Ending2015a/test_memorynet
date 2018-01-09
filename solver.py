@@ -2,6 +2,7 @@ import os
 import time
 import numpy as np
 import tensorflow as tf
+import pandas as pd
 
 from tqdm import tqdm
 from tqdm import trange
@@ -21,7 +22,7 @@ class Solver(object):
         self.learning_rate = kwargs.pop('learning_rate', 0.01)
         self.max_norm_clip = kwargs.pop('max_norm_clip', 40.0)
         self.decay_epoch = kwargs.pop('decay_epoch', 25)
-        self.decay_rate = kwargs.pop('decay_rate', 0.65)
+        self.decay_rate = kwargs.pop('decay_rate', 0.70)
         self.val_epoch = kwargs.pop('val_epoch', 1)
 
         self.linear_start = kwargs.pop('linear_start', True)
@@ -137,32 +138,41 @@ class Solver(object):
             sentence = sentence[0:length-crop] + [padding_word]*pad
             return sentence
 
-        sents_list = []
-        qwos_list = []
-        idx_list = []
+        sentences_list = []
+        question_list = []
+        options_list = []
+        queries_list = []
+        answer_list = []
 
         for q in tqdm(data_list, desc='gen', ncols=80):
             sents = q['sentences']
+            quest = q['question']
+            opts = q['options']
             qwos = q['queries']
-            idx = q['index']
+            ans = q['index']
 
             for i in range(len(sents)):
                 sents[i] = padding_sentence(sents[i], self.sentence_size)
                 assert(len(sents[i]) == self.sentence_size)
 
+            quest = padding_sentence(quest, self.sentence_size)
+
             for i in range(len(qwos)):
                 qwos[i] = padding_sentence(qwos[i], self.sentence_size)
                 assert(len(qwos[i]) == self.sentence_size)
             
-            sents = sents[0:self.sentence_size]
-            qwos = qwos[0:self.option_size]
+            sents = sents[:self.memory_size]
+            qwos = qwos[:self.option_size]
 
             assert(len(sents) == 20)
             assert(len(qwos) == 10)
 
-            sents_list.append(sents)
-            qwos_list.append(qwos)
-            idx_list.append([idx])
+            sentences_list.append(sents)
+            question_list.append(quest)
+            options_list.append(opts)
+            quries_list.append(qwos)
+            answer_list.append([ans])
+            mask_list.append()
 
 
         sent, qwo, idx = tf.train.slice_input_producer(
@@ -298,8 +308,8 @@ class Solver(object):
                     start_iter_time = time.time()
                     for i in range(train_iters_per_epoch):
 
-                        op = [global_step, train_handle.option, train_handle.selection, train_handle.answer, learning_rate, loss, train_op]
-                        step_, o_, s_, a_, lr_, loss_, _ = sess.run(op, feed_dict=feed_dict)
+                        op = [global_step, train_handle.option, train_handle.selection, train_handle.answer, learning_rate, train_handle.debug, loss, train_op]
+                        step_, o_, s_, a_, lr_, dbg_, loss_, _ = sess.run(op, feed_dict=feed_dict)
 
                         curr_loss += loss_
 
@@ -321,6 +331,7 @@ class Solver(object):
                             _selection = decode(o_[0][int(s_[0])], self.dec_map)
                             _answer = decode(o_[0][int(a_[0])], self.dec_map)
 
+                            print('  DEBUG: ', dbg_[0])
                             print('  Answer: {}, {}'.format(int(a_[0]), _answer))
                             print('  Select: {}, {}\n'.format(int(s_[0]), _selection))
 
@@ -444,15 +455,65 @@ class Solver(object):
                 correct = np.sum(s_ == a_)
                 wrong = np.sum(s_ != a_)
                 if (i+1) % self.print_step == 0:                            
-                    print('[eval] [epoch {} | iter {}/{} | save point {}] correct: {}, wrong: {}'.format(
-                                    e+1, i+1, val_iters_per_epoch, save_point, correct, wrong))
+                    print('[eval] [iter {}/{}] correct: {}, wrong: {}'.format(
+                                    i+1, test_iters_per_epoch, correct, wrong))
                 total_correct += correct
                 total_wrong += wrong
 
             accuracy = float(total_correct) / float(total_correct + total_wrong)
-            print('\n[eval] [epoch {} | save point {}] total O/X: {}/{}, accuracy: {:.4f}\n'.format(e+1, save_point, total_correct, total_wrong, accuracy))
+            print('\n[eval] total O/X: {}/{}, accuracy: {:.4f}\n'.format(total_correct, total_wrong, accuracy))
 
             coord.request_stop()
             coord.join(threads)
 
+    def predict(self, question_list):
+        # create global step
+        global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
+
+        # validation set info
+        test_examples = len(question_list)
+
+        print(' :: Building model...')
+
+        # build model & sampler
+        test_handle, generated_answer = self.model.build_sampler()
+
+        print('     DONE !!\n')
+
+        print(' :: Start Session...')
+        config = tf.ConfigProto(allow_soft_placement = True)
+        config.gpu_options.allow_growth = True
+
+        with tf.Session(config=config) as sess:
+            sess.run(tf.global_variables_initializer())
+            summary_writer = tf.summary.FileWriter(self.log_path, graph=tf.get_default_graph())
+            saver = tf.train.Saver(var_list=tf.global_variables(), max_to_keep=10)
+
+            print(' :: Try to restore model...')
+            if self.restore_path is not None:
+                latest_ckpt = tf.train.latest_checkpoint(self.restore_path)
+                if not latest_ckpt:
+                    print('    [Not found] any checkpoint in ', self.restore_path)
+                else:
+                    print('    [Found] pretrained model ', latest_ckpt)
+                    saver.restore(sess, latest_ckpt)
+
+            print(' :: Start testing !!!')
+
+            select_list = []
+            for i in range(test_examples):
+                feed_dict = { test_handle.sentences: np.array([question_list[i]['sentences']]),
+                              test_handle.query: np.array([question_list[i]['question']]),
+                              test_handle.option: np.array([question_list[i]['options']])}
+                op = [test_handle.selection]
+                s_ = sess.run(op, feed_dict=feed_dict)
+
+                if (i+1) % self.print_step == 0:                            
+                    print('[predict] [iter {}/{}] Select: {}'.format(
+                                    i+1, test_examples, s_))
+                select_list += [int(s_[0])]
+
+            print('len: ', len(select_list))
+
+            return select_list
 
